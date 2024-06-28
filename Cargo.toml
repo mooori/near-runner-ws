@@ -4,3 +4,17 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0"
+borsh = { version = "1.0.0", features = ["derive"] }
+near-contract-standards = "5.1.0"
+near-sdk = {version = "5.1.0", features = ["unit-testing"]}
+# TODO remove git depency once PR360 was merged
+near-workspaces = { git = "https://github.com/near/near-workspaces-rs", rev = "refs/pull/360/head" }
+serde_json = "1.0"
+tokio = "1.38.0"
+
+[patch.crates-io]
+# Currently required to avoid build failures: A dependency currently uses a `backtrace` feature that
+# was removed in `0.3.72`.
+# https://github.com/eyre-rs/eyre/issues/174
+backtrace = { git = "https://github.com/rust-lang/backtrace-rs", rev = "0.3.71" }
