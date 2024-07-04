@@ -1,9 +1,15 @@
 use std::env;
 
+use near_sdk::json_types::U128;
+use near_sdk::NearToken;
 use near_workspaces::network::{Sandbox, ValidatorKey};
-use near_workspaces::Worker;
+use near_workspaces::result::ExecutionFinalResult;
+use near_workspaces::{Account, AccountId, Contract, Worker};
+use serde_json::json;
 
 // Consider making these parameters of a CLI.
+pub const FT_WASM_FILEPATH: &str =
+    "./contracts/ft/target/wasm32-unknown-unknown/release/fungible_token.wasm";
 const RPC_ADDRESS: &str = "http://localhost:3030";
 const NEAR_HOME_ENV_VAR: &str = "NEAR_RUNNER_WS_NEAR_HOME";
 
@@ -18,6 +24,50 @@ pub async fn connect_to_sandbox() -> anyhow::Result<Worker<Sandbox>> {
     Ok(worker)
 }
 
+fn assert_success(result: ExecutionFinalResult) {
+    let res = result.into_result();
+    match res {
+        Ok(_) => {}
+        Err(err) => panic!(
+            "Transaction was expected to succeed but failed with:\n{:#?}",
+            err
+        ),
+    }
+}
+
+async fn init_ft_contract(
+    ft_contract: &Contract,
+    owner_id: &AccountId,
+) -> anyhow::Result<ExecutionFinalResult> {
+    let result = ft_contract
+        .call("new_default_meta")
+        .args_json(json!({
+            "owner_id": owner_id,
+            "total_supply": 10e8.to_string(),
+        }))
+        .transact()
+        .await?;
+    Ok(result)
+}
+
+async fn ft_transfer(
+    ft_contract: &AccountId,
+    sender: &Account,
+    receiver: &AccountId,
+    amount: &str,
+) -> anyhow::Result<ExecutionFinalResult> {
+    let result = sender
+        .call(ft_contract, "ft_transfer")
+        .args_json(json!({
+            "receiver_id": receiver,
+            "amount": amount,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+        .transact()
+        .await?;
+    Ok(result)
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[cfg(test)]
 mod tests {
@@ -26,14 +76,9 @@ mod tests {
     use near_contract_standards::fungible_token::FungibleToken;
     use near_sdk::borsh::{BorshDeserialize, BorshSerialize};
     use near_sdk::collections::LazyOption;
-    use near_sdk::{BorshStorageKey, IntoStorageKey};
+    use near_sdk::BorshStorageKey;
     use near_workspaces::result::ExecutionFinalResult;
-    use near_workspaces::types::NearToken;
     use near_workspaces::AccountId;
-    use serde_json::json;
-
-    const FT_WASM_FILEPATH: &str =
-        "./contracts/ft/target/wasm32-unknown-unknown/release/fungible_token.wasm";
 
     #[tokio::test]
     async fn test_observing_gas_limit() -> anyhow::Result<()> {
@@ -67,28 +112,12 @@ mod tests {
 
         // Contract initialization.
         let token_owner = worker.dev_create_account().await?;
-        let result = contract
-            .call("new_default_meta")
-            .args_json(json!({
-                "owner_id": token_owner.id(),
-                "total_supply": 10e8.to_string(),
-            }))
-            .transact()
-            .await?;
+        let result = init_ft_contract(&contract, token_owner.id()).await?;
         assert_success(result);
 
         // Transfering to an unregistered account fails.
         let receiver = worker.dev_create_account().await?;
-        let ft_transfer_deposit = NearToken::from_yoctonear(1);
-        let result = token_owner
-            .call(contract.id(), "ft_transfer")
-            .args_json(json!({
-                "receiver_id": receiver.id(),
-                "amount": 42.to_string(),
-            }))
-            .deposit(ft_transfer_deposit)
-            .transact()
-            .await?;
+        let result = ft_transfer(contract.id(), &token_owner, receiver.id(), "42").await?;
         let expected_err = format!("The account {} is not registered", receiver.id());
         assert_failure_with(result, &expected_err);
 
@@ -112,29 +141,10 @@ mod tests {
             .await?;
 
         // Verify now the user is registered and the transfer succeeds.
-        let result = token_owner
-            .call(contract.id(), "ft_transfer")
-            .args_json(json!({
-                "receiver_id": receiver.id(),
-                "amount": 42.to_string(),
-            }))
-            .deposit(ft_transfer_deposit)
-            .transact()
-            .await?;
+        let result = ft_transfer(contract.id(), &token_owner, receiver.id(), "42").await?;
         assert_success(result);
 
         Ok(())
-    }
-
-    fn assert_success(result: ExecutionFinalResult) {
-        let res = result.into_result();
-        match res {
-            Ok(_) => {}
-            Err(err) => panic!(
-                "Transaction was expected to succeed but failed with:\n{:#?}",
-                err
-            ),
-        }
     }
 
     /// Asserts the execution of `res` failed and the error contains `must_contain`.
