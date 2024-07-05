@@ -3,6 +3,7 @@ use std::env;
 use near_sdk::json_types::U128;
 use near_sdk::NearToken;
 use near_workspaces::network::{Sandbox, ValidatorKey};
+use near_workspaces::operations::CallTransaction;
 use near_workspaces::result::ExecutionFinalResult;
 use near_workspaces::{Account, AccountId, Contract, Worker};
 use serde_json::json;
@@ -24,7 +25,7 @@ pub async fn connect_to_sandbox() -> anyhow::Result<Worker<Sandbox>> {
     Ok(worker)
 }
 
-fn assert_success(result: ExecutionFinalResult) {
+pub fn assert_success(result: ExecutionFinalResult) {
     let res = result.into_result();
     match res {
         Ok(_) => {}
@@ -35,7 +36,7 @@ fn assert_success(result: ExecutionFinalResult) {
     }
 }
 
-async fn init_ft_contract(
+pub async fn init_ft_contract(
     ft_contract: &Contract,
     owner_id: &AccountId,
 ) -> anyhow::Result<ExecutionFinalResult> {
@@ -50,19 +51,44 @@ async fn init_ft_contract(
     Ok(result)
 }
 
-async fn ft_transfer(
+pub async fn register_ft_receiver(
+    ft_contract_id: &AccountId,
+    sender: &Account,
+    to_register: &AccountId,
+) -> anyhow::Result<ExecutionFinalResult> {
+    let result = sender
+        .call(ft_contract_id, "storage_deposit")
+        .args_json(json!({
+            "account_id": to_register,
+        }))
+        .deposit(NearToken::from_millinear(10))
+        .transact()
+        .await?;
+    Ok(result)
+}
+
+pub fn create_ft_transfer_tx(
+    ft_contract: &AccountId,
+    sender: &Account,
+    receiver: &AccountId,
+    amount: &str,
+) -> CallTransaction {
+    sender
+        .call(ft_contract, "ft_transfer")
+        .args_json(json!({
+                        "receiver_id": receiver,
+            "amount": amount,
+        }))
+        .deposit(NearToken::from_yoctonear(1))
+}
+
+pub async fn ft_transfer(
     ft_contract: &AccountId,
     sender: &Account,
     receiver: &AccountId,
     amount: &str,
 ) -> anyhow::Result<ExecutionFinalResult> {
-    let result = sender
-        .call(ft_contract, "ft_transfer")
-        .args_json(json!({
-            "receiver_id": receiver,
-            "amount": amount,
-        }))
-        .deposit(NearToken::from_yoctonear(1))
+    let result = create_ft_transfer_tx(ft_contract, sender, receiver, amount)
         .transact()
         .await?;
     Ok(result)
